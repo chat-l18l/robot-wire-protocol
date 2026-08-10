@@ -25,25 +25,29 @@ static uint32_t read_u32_le(const uint8_t* input)
                       ((uint32_t)input[2] << 16U) | ((uint32_t)input[3] << 24U));
 }
 
-static void encode_header(uint8_t* output, uint16_t message_type, uint32_t sequence)
+static void encode_header(uint8_t* output, uint16_t message_type, uint16_t payload_size,
+                          uint32_t sequence)
 {
     write_u32_le(output, ROBOT_WIRE_MAGIC);
     write_u16_le(&output[4], ROBOT_WIRE_PROTOCOL_VERSION);
     write_u16_le(&output[6], message_type);
-    write_u16_le(&output[8], (uint16_t)ROBOT_LIGHTS_PAYLOAD_SIZE);
+    write_u16_le(&output[8], payload_size);
     write_u16_le(&output[10], UINT16_C(0));
     write_u32_le(&output[12], sequence);
 }
 
 static robot_wire_result_t decode_header(const uint8_t* input, size_t input_size,
-                                         uint16_t expected_message_type, uint32_t* sequence)
+                                          uint16_t expected_message_type,
+                                          uint16_t expected_payload_size, uint32_t* sequence)
 {
     if (input == NULL || sequence == NULL) return ROBOT_WIRE_NULL_ARGUMENT;
-    if (input_size != ROBOT_LIGHTS_MESSAGE_SIZE) return ROBOT_WIRE_INVALID_LENGTH;
+    if (input_size != ROBOT_WIRE_HEADER_SIZE + (size_t)expected_payload_size) {
+        return ROBOT_WIRE_INVALID_LENGTH;
+    }
     if (read_u32_le(input) != ROBOT_WIRE_MAGIC) return ROBOT_WIRE_INVALID_MAGIC;
     if (read_u16_le(&input[4]) != ROBOT_WIRE_PROTOCOL_VERSION) return ROBOT_WIRE_INVALID_VERSION;
     if (read_u16_le(&input[6]) != expected_message_type) return ROBOT_WIRE_INVALID_MESSAGE_TYPE;
-    if (read_u16_le(&input[8]) != (uint16_t)ROBOT_LIGHTS_PAYLOAD_SIZE) return ROBOT_WIRE_INVALID_LENGTH;
+    if (read_u16_le(&input[8]) != expected_payload_size) return ROBOT_WIRE_INVALID_LENGTH;
     *sequence = read_u32_le(&input[12]);
     return ROBOT_WIRE_OK;
 }
@@ -75,7 +79,8 @@ robot_wire_result_t robot_wire_encode_lights_command(const robot_lights_command_
 {
     if (command == NULL || output == NULL) return ROBOT_WIRE_NULL_ARGUMENT;
     if (output_size < ROBOT_LIGHTS_MESSAGE_SIZE) return ROBOT_WIRE_BUFFER_TOO_SMALL;
-    encode_header(output, ROBOT_WIRE_MESSAGE_LIGHTS_COMMAND, command->sequence);
+    encode_header(output, ROBOT_WIRE_MESSAGE_LIGHTS_COMMAND, (uint16_t)ROBOT_LIGHTS_PAYLOAD_SIZE,
+                  command->sequence);
     output[16] = (uint8_t)ROBOT_LIGHT_COUNT;
     output[17] = UINT8_C(0);
     output[18] = UINT8_C(0);
@@ -90,7 +95,8 @@ robot_wire_result_t robot_wire_decode_lights_command(const uint8_t* input, size_
     robot_wire_result_t result;
     uint32_t sequence;
     if (command == NULL) return ROBOT_WIRE_NULL_ARGUMENT;
-    result = decode_header(input, input_size, ROBOT_WIRE_MESSAGE_LIGHTS_COMMAND, &sequence);
+    result = decode_header(input, input_size, ROBOT_WIRE_MESSAGE_LIGHTS_COMMAND,
+                           (uint16_t)ROBOT_LIGHTS_PAYLOAD_SIZE, &sequence);
     if (result != ROBOT_WIRE_OK) return result;
     if (input[16] != (uint8_t)ROBOT_LIGHT_COUNT) return ROBOT_WIRE_INVALID_LIGHT_COUNT;
     command->sequence = sequence;
@@ -105,7 +111,8 @@ robot_wire_result_t robot_wire_encode_lights_state(const robot_lights_state_t* s
     if (output_size < ROBOT_LIGHTS_MESSAGE_SIZE) return ROBOT_WIRE_BUFFER_TOO_SMALL;
     if (state->result > (uint8_t)ROBOT_LIGHTS_RESULT_BUSY_SOURCE) return ROBOT_WIRE_INVALID_RESULT;
     if (state->active_source > (uint8_t)ROBOT_LIGHTS_SOURCE_EDUCATION_JSON) return ROBOT_WIRE_INVALID_SOURCE;
-    encode_header(output, ROBOT_WIRE_MESSAGE_LIGHTS_STATE, state->sequence);
+    encode_header(output, ROBOT_WIRE_MESSAGE_LIGHTS_STATE, (uint16_t)ROBOT_LIGHTS_PAYLOAD_SIZE,
+                  state->sequence);
     output[16] = (uint8_t)ROBOT_LIGHT_COUNT;
     output[17] = state->result;
     output[18] = state->active_source;
@@ -120,7 +127,8 @@ robot_wire_result_t robot_wire_decode_lights_state(const uint8_t* input, size_t 
     robot_wire_result_t result;
     uint32_t sequence;
     if (state == NULL) return ROBOT_WIRE_NULL_ARGUMENT;
-    result = decode_header(input, input_size, ROBOT_WIRE_MESSAGE_LIGHTS_STATE, &sequence);
+    result = decode_header(input, input_size, ROBOT_WIRE_MESSAGE_LIGHTS_STATE,
+                           (uint16_t)ROBOT_LIGHTS_PAYLOAD_SIZE, &sequence);
     if (result != ROBOT_WIRE_OK) return result;
     if (input[16] != (uint8_t)ROBOT_LIGHT_COUNT) return ROBOT_WIRE_INVALID_LIGHT_COUNT;
     if (input[17] > (uint8_t)ROBOT_LIGHTS_RESULT_BUSY_SOURCE) return ROBOT_WIRE_INVALID_RESULT;
@@ -129,5 +137,61 @@ robot_wire_result_t robot_wire_decode_lights_state(const uint8_t* input, size_t 
     state->result = input[17];
     state->active_source = input[18];
     decode_rgb_values(&input[20], state->lights);
+    return ROBOT_WIRE_OK;
+}
+
+robot_wire_result_t robot_wire_encode_estop_clear_reset_request(
+    const robot_estop_clear_reset_request_t* request, uint8_t* output, size_t output_size)
+{
+    if (request == NULL || output == NULL) return ROBOT_WIRE_NULL_ARGUMENT;
+    if (output_size < ROBOT_ESTOP_CLEAR_RESET_MESSAGE_SIZE) return ROBOT_WIRE_BUFFER_TOO_SMALL;
+    encode_header(output, ROBOT_WIRE_MESSAGE_ESTOP_CLEAR_RESET_REQUEST,
+                  (uint16_t)ROBOT_ESTOP_CLEAR_RESET_PAYLOAD_SIZE, request->sequence);
+    write_u32_le(&output[16], UINT32_C(0));
+    return ROBOT_WIRE_OK;
+}
+
+robot_wire_result_t robot_wire_decode_estop_clear_reset_request(
+    const uint8_t* input, size_t input_size, robot_estop_clear_reset_request_t* request)
+{
+    if (request == NULL) return ROBOT_WIRE_NULL_ARGUMENT;
+    return decode_header(input, input_size, ROBOT_WIRE_MESSAGE_ESTOP_CLEAR_RESET_REQUEST,
+                         (uint16_t)ROBOT_ESTOP_CLEAR_RESET_PAYLOAD_SIZE, &request->sequence);
+}
+
+robot_wire_result_t robot_wire_encode_estop_clear_reset_state(
+    const robot_estop_clear_reset_state_t* state, uint8_t* output, size_t output_size)
+{
+    if (state == NULL || output == NULL) return ROBOT_WIRE_NULL_ARGUMENT;
+    if (output_size < ROBOT_ESTOP_CLEAR_RESET_MESSAGE_SIZE) return ROBOT_WIRE_BUFFER_TOO_SMALL;
+    if (state->result > (uint8_t)ROBOT_ESTOP_CLEAR_RESET_INTERNAL_ERROR) {
+        return ROBOT_WIRE_INVALID_ESTOP_CLEAR_RESET_RESULT;
+    }
+    encode_header(output, ROBOT_WIRE_MESSAGE_ESTOP_CLEAR_RESET_RESULT,
+                  (uint16_t)ROBOT_ESTOP_CLEAR_RESET_PAYLOAD_SIZE, state->sequence);
+    output[16] = state->result;
+    output[17] = state->needs_reset;
+    output[18] = state->estop_active;
+    output[19] = UINT8_C(0);
+    return ROBOT_WIRE_OK;
+}
+
+robot_wire_result_t robot_wire_decode_estop_clear_reset_state(
+    const uint8_t* input, size_t input_size, robot_estop_clear_reset_state_t* state)
+{
+    robot_wire_result_t result;
+    uint32_t sequence;
+    if (state == NULL) return ROBOT_WIRE_NULL_ARGUMENT;
+    result = decode_header(input, input_size, ROBOT_WIRE_MESSAGE_ESTOP_CLEAR_RESET_RESULT,
+                           (uint16_t)ROBOT_ESTOP_CLEAR_RESET_PAYLOAD_SIZE, &sequence);
+    if (result != ROBOT_WIRE_OK) return result;
+    if (input[16] > (uint8_t)ROBOT_ESTOP_CLEAR_RESET_INTERNAL_ERROR) {
+        return ROBOT_WIRE_INVALID_ESTOP_CLEAR_RESET_RESULT;
+    }
+    if (input[17] > UINT8_C(1) || input[18] > UINT8_C(1)) return ROBOT_WIRE_INVALID_LENGTH;
+    state->sequence = sequence;
+    state->result = input[16];
+    state->needs_reset = input[17];
+    state->estop_active = input[18];
     return ROBOT_WIRE_OK;
 }

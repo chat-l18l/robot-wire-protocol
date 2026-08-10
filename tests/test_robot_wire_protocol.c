@@ -26,6 +26,12 @@ int main(void)
     robot_lights_command_t decoded = {0};
     robot_lights_state_t state = {0};
     robot_lights_state_t decoded_state = {0};
+    robot_estop_clear_reset_request_t reset_request = {UINT32_C(0x11223344)};
+    robot_estop_clear_reset_request_t decoded_reset_request = {0};
+    robot_estop_clear_reset_state_t reset_state = {
+        UINT32_C(0x11223344), ROBOT_ESTOP_CLEAR_RESET_OK, UINT8_C(0), UINT8_C(0)};
+    robot_estop_clear_reset_state_t decoded_reset_state = {0};
+    uint8_t reset_encoded[ROBOT_ESTOP_CLEAR_RESET_MESSAGE_SIZE] = {0};
 
     assert(robot_wire_encode_lights_command(&command, encoded, sizeof(encoded)) == ROBOT_WIRE_OK);
     assert(memcmp(encoded, golden, sizeof(encoded)) == 0);
@@ -43,5 +49,16 @@ int main(void)
     assert(robot_wire_encode_lights_state(&state, encoded, sizeof(encoded)) == ROBOT_WIRE_OK);
     assert(robot_wire_decode_lights_state(encoded, sizeof(encoded), &decoded_state) == ROBOT_WIRE_OK);
     assert(memcmp(&state, &decoded_state, sizeof(state)) == 0);
+
+    assert(robot_wire_encode_estop_clear_reset_request(&reset_request, reset_encoded,
+                                                        sizeof(reset_encoded)) == ROBOT_WIRE_OK);
+    assert(robot_wire_decode_estop_clear_reset_request(reset_encoded, sizeof(reset_encoded),
+                                                        &decoded_reset_request) == ROBOT_WIRE_OK);
+    assert(memcmp(&reset_request, &decoded_reset_request, sizeof(reset_request)) == 0);
+    assert(robot_wire_encode_estop_clear_reset_state(&reset_state, reset_encoded,
+                                                      sizeof(reset_encoded)) == ROBOT_WIRE_OK);
+    assert(robot_wire_decode_estop_clear_reset_state(reset_encoded, sizeof(reset_encoded),
+                                                      &decoded_reset_state) == ROBOT_WIRE_OK);
+    assert(memcmp(&reset_state, &decoded_reset_state, sizeof(reset_state)) == 0);
     return 0;
 }

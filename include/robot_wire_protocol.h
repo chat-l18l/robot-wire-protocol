@@ -14,10 +14,16 @@ extern "C" {
 
 #define ROBOT_WIRE_MESSAGE_LIGHTS_COMMAND UINT16_C(3)
 #define ROBOT_WIRE_MESSAGE_LIGHTS_STATE UINT16_C(4)
+#define ROBOT_WIRE_MESSAGE_ESTOP_CLEAR_RESET_REQUEST UINT16_C(5)
+#define ROBOT_WIRE_MESSAGE_ESTOP_CLEAR_RESET_RESULT UINT16_C(6)
 
 #define ROBOT_LIGHT_COUNT ((size_t)4)
 #define ROBOT_LIGHTS_PAYLOAD_SIZE ((size_t)16)
 #define ROBOT_LIGHTS_MESSAGE_SIZE (ROBOT_WIRE_HEADER_SIZE + ROBOT_LIGHTS_PAYLOAD_SIZE)
+
+#define ROBOT_ESTOP_CLEAR_RESET_PAYLOAD_SIZE ((size_t)4)
+#define ROBOT_ESTOP_CLEAR_RESET_MESSAGE_SIZE \
+    (ROBOT_WIRE_HEADER_SIZE + ROBOT_ESTOP_CLEAR_RESET_PAYLOAD_SIZE)
 
 typedef enum robot_wire_result {
     ROBOT_WIRE_OK = 0,
@@ -29,7 +35,8 @@ typedef enum robot_wire_result {
     ROBOT_WIRE_INVALID_LENGTH = 6,
     ROBOT_WIRE_INVALID_LIGHT_COUNT = 7,
     ROBOT_WIRE_INVALID_RESULT = 8,
-    ROBOT_WIRE_INVALID_SOURCE = 9
+    ROBOT_WIRE_INVALID_SOURCE = 9,
+    ROBOT_WIRE_INVALID_ESTOP_CLEAR_RESET_RESULT = 10
 } robot_wire_result_t;
 
 typedef enum robot_lights_result {
@@ -46,6 +53,15 @@ typedef enum robot_lights_source {
     ROBOT_LIGHTS_SOURCE_ROS_BINARY = 2,
     ROBOT_LIGHTS_SOURCE_EDUCATION_JSON = 3
 } robot_lights_source_t;
+
+typedef enum robot_estop_clear_reset_result {
+    ROBOT_ESTOP_CLEAR_RESET_OK = 0,
+    ROBOT_ESTOP_CLEAR_RESET_ESTOP_ACTIVE = 1,
+    ROBOT_ESTOP_CLEAR_RESET_NO_RESET_PENDING = 2,
+    ROBOT_ESTOP_CLEAR_RESET_SAFETY_SEQUENCE_INCOMPLETE = 3,
+    ROBOT_ESTOP_CLEAR_RESET_FAULT_ACTIVE = 4,
+    ROBOT_ESTOP_CLEAR_RESET_INTERNAL_ERROR = 5
+} robot_estop_clear_reset_result_t;
 
 typedef struct robot_rgb
 {
@@ -68,6 +84,19 @@ typedef struct robot_lights_state
     robot_rgb_t lights[ROBOT_LIGHT_COUNT];
 } robot_lights_state_t;
 
+typedef struct robot_estop_clear_reset_request
+{
+    uint32_t sequence;
+} robot_estop_clear_reset_request_t;
+
+typedef struct robot_estop_clear_reset_state
+{
+    uint32_t sequence;
+    uint8_t result;
+    uint8_t needs_reset;
+    uint8_t estop_active;
+} robot_estop_clear_reset_state_t;
+
 robot_wire_result_t robot_wire_encode_lights_command(const robot_lights_command_t* command,
                                                       uint8_t* output, size_t output_size);
 robot_wire_result_t robot_wire_decode_lights_command(const uint8_t* input, size_t input_size,
@@ -75,7 +104,15 @@ robot_wire_result_t robot_wire_decode_lights_command(const uint8_t* input, size_
 robot_wire_result_t robot_wire_encode_lights_state(const robot_lights_state_t* state,
                                                     uint8_t* output, size_t output_size);
 robot_wire_result_t robot_wire_decode_lights_state(const uint8_t* input, size_t input_size,
-                                                    robot_lights_state_t* state);
+                                                     robot_lights_state_t* state);
+robot_wire_result_t robot_wire_encode_estop_clear_reset_request(
+    const robot_estop_clear_reset_request_t* request, uint8_t* output, size_t output_size);
+robot_wire_result_t robot_wire_decode_estop_clear_reset_request(
+    const uint8_t* input, size_t input_size, robot_estop_clear_reset_request_t* request);
+robot_wire_result_t robot_wire_encode_estop_clear_reset_state(
+    const robot_estop_clear_reset_state_t* state, uint8_t* output, size_t output_size);
+robot_wire_result_t robot_wire_decode_estop_clear_reset_state(
+    const uint8_t* input, size_t input_size, robot_estop_clear_reset_state_t* state);
 
 #ifdef __cplusplus
 }
