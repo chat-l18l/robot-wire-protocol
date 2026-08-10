@@ -1,0 +1,2 @@
+version: "1.0.0"
+description: Versioned C11 wire codecs shared by the robot gateway and ESP32 motion core.
