@@ -4,7 +4,10 @@
 
 | Direction | Zenoh key | Encoding |
 |---|---|---|
-| Gateway to motion core | `robot/v1/safety/estop/clear_reset` | `application/octet-stream` |
+| Gateway to motion core | `<zenoh_prefix>/safety/estop/clear_reset` | `application/octet-stream` |
+
+`zenoh_prefix` identifies one robot. The single-robot default is `robot/v1`;
+the gateway and motion core must use the same configured prefix.
 
 The gateway issues a Zenoh query on this key. The ESP32-P4 motion core is the
 queryable and returns exactly one result frame.

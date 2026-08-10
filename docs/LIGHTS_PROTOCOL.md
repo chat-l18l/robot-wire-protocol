@@ -4,8 +4,12 @@
 
 | Direction | Zenoh key | Encoding |
 |---|---|---|
-| Gateway to motion core | `robot/v1/io/lights/cmd` | `application/octet-stream` |
-| Motion core to gateway | `robot/v1/io/lights/state` | `application/octet-stream` |
+| Gateway to motion core | `<zenoh_prefix>/io/lights/cmd` | `application/octet-stream` |
+| Motion core to gateway | `<zenoh_prefix>/io/lights/state` | `application/octet-stream` |
+
+`zenoh_prefix` identifies one robot. The single-robot default is `robot/v1`;
+an A300-style robot identity may use `robots/a300_00000/v1`. The gateway and
+motion core must use the same configured prefix.
 
 ## Version 1
 
