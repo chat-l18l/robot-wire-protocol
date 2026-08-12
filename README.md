@@ -11,7 +11,9 @@ ESP-IDF and hardware drivers.
 - `docs/`: protocol and Zenoh route contracts;
 - `tests/`: host golden-vector and decoder tests;
 - `espidf/`: ESP-IDF component entry point; copy this directory layout into an
-  ESP-IDF component or include this repository as a component dependency.
+  ESP-IDF component or include this repository as a component dependency;
+- `python/`: pure Python mirror of the same codecs, for tooling and test
+  scripts that would otherwise hand-pack a struct.
 
 ## Build and test
 
@@ -20,6 +22,25 @@ cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+## Python
+
+`python/robot_wire_protocol.py` encodes and decodes the same messages as the C
+code, with no third-party dependencies. It exists so tooling and bench scripts
+do not reimplement the protocol in a consumer repository, which is the same
+rule the versioning section states for the C side.
+
+`tests/test_python_matches_golden.py` asserts the Python encoder against the
+byte-for-byte golden frame the C test uses. The point is not that Python works;
+it is that the two implementations agree, so a drift between them fails a test
+rather than surfacing as a frame only one end understands.
+
+```bash
+python3 tests/test_python_matches_golden.py
+```
+
+Like the C code, this module is transport-agnostic: it turns messages into
+bytes and back, and the caller supplies Zenoh, a socket, or a file.
 
 ## Versioning
 
