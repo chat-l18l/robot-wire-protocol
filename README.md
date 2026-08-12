@@ -8,12 +8,25 @@ ESP-IDF and hardware drivers.
 
 - `include/`: public C11 protocol API;
 - `src/`: allocation-free codec implementation;
-- `docs/`: protocol and Zenoh route contracts;
+- `docs/`: architecture rationale, plus protocol and Zenoh route contracts;
 - `tests/`: host golden-vector and decoder tests;
 - `espidf/`: ESP-IDF component entry point; copy this directory layout into an
   ESP-IDF component or include this repository as a component dependency;
 - `python/`: pure Python mirror of the same codecs, for tooling and test
   scripts that would otherwise hand-pack a struct.
+
+## Why this is a separate repository
+
+The short version: a contract that lives inside one participant is not a
+contract, it is that participant's preference. The gateway and the firmware
+never include each other's headers; this repository is their only common
+ground, which is what lets either evolve without silently breaking the other.
+
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) explains the separation of
+concerns in full: the three repositories and what each owns, why encoding is
+kept apart from transport and application, where the boundary is subtler than
+it looks, and how two implementations of one spec are kept honest rather than
+being duplication under a nicer name.
 
 ## Build and test
 
