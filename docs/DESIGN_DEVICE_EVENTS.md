@@ -189,11 +189,16 @@ event is published. A pulse that rises and falls entirely between two
 publications still shows up: the level bits look unchanged, and the changed bit
 is set.
 
-That gives "something happened here" for every input at four extra bytes,
+That gives "something happened here" for every input at eight extra bytes,
 without per-input counters and without committing to which inputs are special.
 It does not give timing or a count of pulses. If some input eventually needs
 those, that is a counter on the vehicle reported in its own payload, and the
 mask will have told you which input deserved one.
+
+Outputs get the same mask, which looks redundant since the host commanded them,
+until you notice `RBT_CFG_HONK_PULSE_MS` is 1000 and the heartbeat interval is
+also 1000. A horn pulse could fall entirely between two snapshots and leave no
+trace at all.
 
 ## Proposed message types
 
@@ -205,25 +210,25 @@ native GPIO is counted, so 32 bits would have been too narrow.
 
 ```text
  0..15   event prefix                     as above
-16..23   inputs           uint64          level at publication
-24..31   changed          uint64          changed since the previous event
-32..39   outputs          uint64          commanded output level
-40       input_count      uint8           meaningful bits, <= 64
-41       output_count     uint8           meaningful bits, <= 64
-42..43   reserved         uint16          zero
+16..23   inputs_level     uint64          logical level at publication
+24..31   inputs_changed   uint64          changed since the previous event
+32..39   inputs_valid     uint64          which input bits the vehicle implements
+40..47   outputs_level    uint64
+48..55   outputs_changed  uint64
+56..63   outputs_valid    uint64
 ```
 
-Payload 44 bytes, frame 60. A count above 64 is rejected, in the same style as
-`ROBOT_WIRE_INVALID_LIGHT_COUNT`.
-
-Bit order is fixed by the contract and must be written down in the protocol
-document, not inferred from the firmware's expander scan order. That is the
-same mistake the lamp ordering already made once.
+Payload 64 bytes, frame 80. Everything is 8-byte aligned, there is no padding
+and there are no count fields. At the 1 Hz heartbeat that is 80 bytes per
+second per vehicle.
 
 Clearpath's `PinoutState` also carries `rails` and `output_periods`. Both are
 omitted: this vehicle has no rail concept and periods are a command-side
 detail. Adding them later is a new type, not a longer payload, because payload
 size is fixed per type by design.
+
+The bit assignment has its own section below, because it is the part that is
+expensive to get wrong.
 
 ### Type 8, `LIGHTS_EVENT`
 
@@ -253,6 +258,121 @@ The RC transmitter being switched off, which is what produced the original
 warning, becomes a `LIGHTS_EVENT` with `result = OVERRIDDEN`, `source =
 SAFETY`. When the link returns, another event with `result = OK`. Both are
 delivered, and neither is unmatched, because neither claims to match anything.
+
+## The pinout bit assignment
+
+Free to choose right now, and expensive to change once a gateway is reading it,
+because a moved bit still decodes. It just means something else.
+
+### Bits are signals, not pins
+
+The obvious mapping is physical: `bit = expander_index * 16 + pin`, so MCP0 pin
+0 is bit 0 and MCP2 pin 3 is bit 35. It needs no table, and a bit number can be
+read straight off a schematic.
+
+It is rejected anyway, for the reason this repository exists. A physically
+derived map makes the contract a function of *this vehicle's wiring*. Move the
+horn to a free pin on the rear expander during a board revision and every
+gateway silently reports the wrong signal, with no decode error anywhere,
+because bit 8 is still a perfectly valid bit. That is the lamp-order failure
+again, and this time across 48 lines instead of four.
+
+The vehicle also proves the point on its own hardware: the e-brake is not on an
+expander at all, it is native GPIO 11. Under a physical map it has no bit, or
+needs a special region invented for it. Under a semantic map it is a signal
+like any other and its location is nobody else's business.
+
+So: **a bit is assigned to a named signal, and where that signal is wired is
+the firmware's private matter.** Inputs and outputs are numbered in separate
+spaces starting at 0, because they are separate masks. Output bit 0 is the
+horn even though the horn sits on physical pin 8.
+
+The assignment lives in `robot_wire_protocol.h` as an enum, so both consumers
+compile against one definition rather than each keeping a table that agrees
+until someone edits one of them.
+
+### 1 means the condition is true
+
+The second rule, and the one most likely to be broken by accident:
+
+**A bit is 1 when the named condition holds.** Not when the pin is high.
+
+Buttons on the MCP23017 read low when pressed, with a pull-up. `BUTTON_UP` is
+still 1 when the button is pressed. The e-brake has
+`RBT_CFG_EBRAKE_ACTIVE_LEVEL = 0`. `EBRAKE` is still 1 when the brake is
+applied. Pull-ups, the expander's `IPOL` register and active-low wiring are
+firmware concerns and never reach the wire, because a gateway that had to know
+about them would have hardware knowledge it has no way to keep correct.
+
+Each bit is therefore named for the condition that is true when it is 1, which
+is why the direction lines are `..._REVERSE` rather than `..._DIR`. A name that
+does not say what 1 means is an invitation to guess.
+
+### Blocks, so growth stays orderly
+
+Numbers are handed out in blocks of 16 rather than sequentially. It costs
+nothing, the masks are 64 bits either way, and it keeps related signals
+together as hardware is added instead of interleaving them by installation
+date.
+
+**Inputs**
+
+| Bits | Block | Assigned |
+| --- | --- | --- |
+| 0–15 | operator panel | 0 `BUTTON_UP`, 1 `BUTTON_DOWN`, 2 `BUTTON_ESC`, 3 `BUTTON_ENTER`, 4 `BUTTON_TEST`, 5 `TOGGLE_1`, 6 `TOGGLE_2`, 7 `TOGGLE_3` |
+| 16–31 | safety chain | 16 `ESTOP` (assigned, not yet implemented) |
+| 32–47 | drivetrain feedback | none yet |
+| 48–63 | auxiliary connector | none yet |
+
+**Outputs**
+
+| Bits | Block | Assigned |
+| --- | --- | --- |
+| 0–15 | signalling and indication | 0 `HORN`, 1 `HEARTBEAT`, 2 `FULLSTOP_LED`, 3 `ZENOH_LED`, 4 `INDICATOR_LEFT`, 5 `INDICATOR_RIGHT`, 6 `AUTONOMOUS_LED` |
+| 16–31 | drivetrain control | 16 `THROTTLE_DIR_REVERSE`, 17 `EBRAKE`, 18 `SKID_DIR_FL_REVERSE`, 19 `SKID_DIR_FR_REVERSE`, 20 `SKID_DIR_RL_REVERSE`, 21 `SKID_DIR_RR_REVERSE` |
+| 32–47 | auxiliary connector | none yet |
+| 48–63 | expansion | none yet |
+
+The WS2812 lamps are deliberately absent: they are `LIGHTS_EVENT`, with colour,
+arbitration result and source. Repeating them here as on/off bits would be a
+second, poorer answer to a question already answered.
+
+The rear expander at `0x26` has no assignments because it has no signals yet.
+A pin without a signal gets no bit. That is the whole proposal in one line.
+
+### Why `valid` masks replaced the count fields
+
+The earlier sketch had `input_count` and `output_count`, one byte each, meaning
+"the first N bits are meaningful". Sixteen bytes of mask buys three things that
+a prefix count cannot:
+
+**Unknown is distinguishable from false.** This is the decisive one, and the
+e-stop is the example. Under a count, an unimplemented `ESTOP` bit reads 0, and
+0 in a level mask means *not asserted*. A gateway would report a healthy e-stop
+on a vehicle that has none wired. Under a valid mask, bit 16 is simply absent,
+and a consumer that reads a level bit without checking the valid bit has made a
+mistake it can be told about.
+
+**Numbers can be assigned before hardware exists.** `ESTOP` is bit 16 today
+even though the switch is not on the board. Both consumers can be written and
+reviewed now, and the bit turns valid when the switch is wired, with no
+protocol change and no renumbering.
+
+**Blocks work at all.** A prefix count cannot express "bits 0–7 and bit 16",
+which is exactly what this vehicle has. Block allocation and a count field are
+mutually exclusive; the masks are what make the blocks affordable.
+
+The rules that follow: a bit number is permanent, a retired signal's number is
+never reused, and a bit that is 0 in `valid` says nothing whatsoever about the
+corresponding level bit. The encoder should force level and changed bits to 0
+outside the valid mask so that a lazy consumer reading a level directly gets
+the harmless answer rather than a stale one.
+
+### Where this lives once it is built
+
+In `PINOUT_PROTOCOL.md` beside `LIGHTS_PROTOCOL.md`, with the enum in
+`robot_wire_protocol.h`. It stays in this design document only until something
+implements it.
 
 ## Transport: one key per subsystem
 
@@ -286,9 +406,10 @@ wildcard for debugging.
 
 ## Still open
 
-1. **Bit assignment for the pinout masks.** Which physical line is bit 0. This
-   must be decided here and written into the protocol document before either
-   consumer implements it.
+1. **Signals on the rear expander at `0x26`.** It has no assignments because it
+   has no signals. When rear indicators or brake lights land there, they take
+   numbers from the blocks above, and the choice will be whether brake lights
+   are pinout outputs or belong with the lamps.
 2. **Whether `LIGHTS_STATE` survives.** With `LIGHTS_EVENT` carrying the
    spontaneous case, `LIGHTS_STATE` becomes purely a reply, which is what the
    gateway already assumes. That is a clean outcome, but it should be confirmed
@@ -308,6 +429,16 @@ wildcard for debugging.
   prove it: read from `tests/test_python_matches_golden.py`.
 - Three MCP23017 expanders, so 48 expander lines: read from the firmware's
   `include/config.h`.
+- Every signal in the bit tables exists in the firmware today: MCP0 at `0x27`
+  carries the five buttons and three toggles on pins 0–7 and the eight outputs
+  on pins 8–15; MCP2 at `0x25` carries the four skid direction lines on pins
+  0–3; MCP1 at `0x26` has no assignments. Read from `include/config.h`.
+- The e-brake is native GPIO 11 with `RBT_CFG_EBRAKE_ACTIVE_LEVEL = 0`, which
+  is the case that decides physical against semantic numbering, and the horn
+  pulse is 1000 ms against a 1000 ms heartbeat: same file.
+- The expander driver exposes `set_pullup` and `set_pin_polarity` (`GPPU` and
+  `IPOL`), so electrical polarity is already a firmware-side concern with
+  somewhere to live: read from `src/rbt_mcp23017.c`.
 - Message types 3 to 6 are the only assigned numbers: read from
   `include/robot_wire_protocol.h`.
 
