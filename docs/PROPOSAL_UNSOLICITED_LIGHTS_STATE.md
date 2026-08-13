@@ -104,6 +104,19 @@ Add `LIGHTS_STATE_EVENT` alongside `LIGHTS_STATE`.
 - Costs a message type, requires both consumers to implement it, and an older
   gateway rejects the new type outright rather than degrading.
 
+## Superseded in part
+
+[Research: device-initiated events](RESEARCH_DEVICE_INITIATED_EVENTS.md) answers
+the question this proposal deferred. GPIO inputs, AUX and odometry all need
+vehicle-originated messages, so at least three subsystems require the same
+category rather than one. That settles the "what decides it" question below in
+favour of a general answer, and rules out the flag: a per-message flag would
+leave the timestamp, the numbering and the restart problem unsolved separately
+in each case.
+
+The recommendation below is kept as written for the record. Read it as the
+lights-only view, taken before the general shape was understood.
+
 ## Recommendation
 
 Option 3, written up as an explicit addendum to version 1, with option 2's

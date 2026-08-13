@@ -8,7 +8,8 @@ ESP-IDF and hardware drivers.
 
 - `include/`: public C11 protocol API;
 - `src/`: allocation-free codec implementation;
-- `docs/`: architecture rationale, plus protocol and Zenoh route contracts;
+- `docs/`: architecture rationale, protocol and Zenoh route contracts, plus
+  open research and proposals;
 - `tests/`: host golden-vector and decoder tests;
 - `espidf/`: ESP-IDF component entry point; copy this directory layout into an
   ESP-IDF component or include this repository as a component dependency;
