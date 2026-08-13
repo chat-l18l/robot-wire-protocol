@@ -129,6 +129,17 @@ So the general answer is the right one, and the flag is not it. A per-message
 flag would leave the timestamp, the numbering and the restart problem unsolved
 in each case separately.
 
+## The alternative that was considered and rejected
+
+micro-ROS would remove this problem entirely by making the microcontroller a
+ROS 2 node, so a GPIO change becomes an ordinary topic publication with a
+standard header. It was evaluated and not adopted: interface definitions are
+compiled into the firmware, so every message change and every distribution
+upgrade means reflashing every vehicle, and ESP32-P4 is not among its supported
+chips. See [Evaluation: micro-ROS](EVALUATION_MICRO_ROS.md).
+
+That evaluation is why the work below is worth doing rather than avoided.
+
 ## Shape of a possible answer
 
 Not a decision, a sketch to argue about.

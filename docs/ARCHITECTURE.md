@@ -180,6 +180,16 @@ since it is not one and must not become one.
   the vehicle rather than about the script.
 - Neither consumer can quietly redefine the contract to suit itself.
 
+## The alternative to all of this
+
+micro-ROS makes the microcontroller a ROS 2 node and removes the need for a
+separate protocol at all. It was evaluated and rejected for this fleet, and the
+reasoning is worth knowing before anyone proposes it again: interface
+definitions compile into the firmware, so a message change or a distribution
+upgrade reflashes every vehicle, and the separation described above is exactly
+what gets traded away. See [Evaluation: micro-ROS](EVALUATION_MICRO_ROS.md),
+including the conditions under which the answer should change.
+
 ## Rules that follow
 
 1. No transport, no ROS 2, no ESP-IDF, no drivers in this repository. If a
