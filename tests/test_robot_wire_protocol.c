@@ -15,6 +15,86 @@ static robot_lights_command_t distinct_command(void)
     return command;
 }
 
+/* Distinct in every field, so a swapped offset shows up rather than cancelling
+ * out. Levels and changed bits stay inside their valid masks, which is what a
+ * conforming vehicle publishes. */
+static robot_pinout_event_t distinct_pinout_event(void)
+{
+    robot_pinout_event_t event = {0};
+    event.uptime_ms = UINT64_C(0x0102030405060708);
+    event.event_sequence = UINT32_C(0x11223344);
+    event.boot_id = UINT32_C(0x55667788);
+    event.inputs_valid = ROBOT_PINOUT_BIT(ROBOT_PINOUT_IN_BUTTON_UP) |
+                         ROBOT_PINOUT_BIT(ROBOT_PINOUT_IN_BUTTON_DOWN) |
+                         ROBOT_PINOUT_BIT(ROBOT_PINOUT_IN_BUTTON_ESC) |
+                         ROBOT_PINOUT_BIT(ROBOT_PINOUT_IN_BUTTON_ENTER) |
+                         ROBOT_PINOUT_BIT(ROBOT_PINOUT_IN_BUTTON_TEST) |
+                         ROBOT_PINOUT_BIT(ROBOT_PINOUT_IN_TOGGLE_1) |
+                         ROBOT_PINOUT_BIT(ROBOT_PINOUT_IN_TOGGLE_2) |
+                         ROBOT_PINOUT_BIT(ROBOT_PINOUT_IN_TOGGLE_3) |
+                         ROBOT_PINOUT_BIT(ROBOT_PINOUT_IN_ESTOP);
+    event.inputs_level = ROBOT_PINOUT_BIT(ROBOT_PINOUT_IN_BUTTON_UP) |
+                         ROBOT_PINOUT_BIT(ROBOT_PINOUT_IN_TOGGLE_1);
+    event.inputs_changed = ROBOT_PINOUT_BIT(ROBOT_PINOUT_IN_TOGGLE_1);
+    event.outputs_valid = ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_HORN) |
+                          ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_HEARTBEAT) |
+                          ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_FULLSTOP_LED) |
+                          ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_ZENOH_LED) |
+                          ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_INDICATOR_LEFT) |
+                          ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_INDICATOR_RIGHT) |
+                          ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_AUTONOMOUS_LED) |
+                          ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_THROTTLE_DIR_REVERSE) |
+                          ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_EBRAKE) |
+                          ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_SKID_DIR_FL_REVERSE) |
+                          ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_SKID_DIR_FR_REVERSE) |
+                          ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_SKID_DIR_RL_REVERSE) |
+                          ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_SKID_DIR_RR_REVERSE);
+    event.outputs_level = ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_HEARTBEAT);
+    event.outputs_changed = ROBOT_PINOUT_BIT(ROBOT_PINOUT_OUT_THROTTLE_DIR_REVERSE);
+    return event;
+}
+
+static void test_pinout_event(void)
+{
+    const uint8_t golden[ROBOT_PINOUT_EVENT_MESSAGE_SIZE] = {
+        0x52, 0x42, 0x43, 0x31, 0x01, 0x00, 0x07, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x44, 0x33, 0x22, 0x11,
+        0x88, 0x77, 0x66, 0x55, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x7f, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00};
+    const robot_pinout_event_t event = distinct_pinout_event();
+    robot_pinout_event_t rejected = distinct_pinout_event();
+    robot_pinout_event_t decoded = {0};
+    uint8_t encoded[ROBOT_PINOUT_EVENT_MESSAGE_SIZE] = {0};
+
+    assert(robot_wire_encode_pinout_event(&event, encoded, sizeof(encoded)) == ROBOT_WIRE_OK);
+    assert(memcmp(encoded, golden, sizeof(encoded)) == 0);
+    assert(robot_wire_decode_pinout_event(encoded, sizeof(encoded), &decoded) == ROBOT_WIRE_OK);
+    assert(memcmp(&event, &decoded, sizeof(event)) == 0);
+
+    assert(robot_wire_encode_pinout_event(&event, encoded, sizeof(encoded) - 1U) ==
+           ROBOT_WIRE_BUFFER_TOO_SMALL);
+    assert(robot_wire_decode_pinout_event(encoded, sizeof(encoded) - 1U, &decoded) ==
+           ROBOT_WIRE_INVALID_LENGTH);
+    assert(robot_wire_encode_pinout_event(NULL, encoded, sizeof(encoded)) ==
+           ROBOT_WIRE_NULL_ARGUMENT);
+
+    /* A level bit the vehicle does not implement must not survive either
+     * direction, or "not wired" would read as "not asserted". */
+    rejected.inputs_level |= ROBOT_PINOUT_BIT(40);
+    assert(robot_wire_encode_pinout_event(&rejected, encoded, sizeof(encoded)) ==
+           ROBOT_WIRE_INVALID_PINOUT_MASK);
+    encoded[37] = 0x01U; /* bit 40 of inputs_level, at payload offset 16 + 5 */
+    assert(robot_wire_decode_pinout_event(encoded, sizeof(encoded), &decoded) ==
+           ROBOT_WIRE_INVALID_PINOUT_MASK);
+    assert(memcmp(&event, &decoded, sizeof(event)) == 0); /* untouched by the rejection */
+
+    encoded[6] = 0x08U; /* an unassigned message type is rejected, not guessed */
+    assert(robot_wire_decode_pinout_event(encoded, sizeof(encoded), &decoded) ==
+           ROBOT_WIRE_INVALID_MESSAGE_TYPE);
+}
+
 int main(void)
 {
     const uint8_t golden[ROBOT_LIGHTS_MESSAGE_SIZE] = {
@@ -60,5 +140,7 @@ int main(void)
     assert(robot_wire_decode_estop_clear_reset_state(reset_encoded, sizeof(reset_encoded),
                                                       &decoded_reset_state) == ROBOT_WIRE_OK);
     assert(memcmp(&reset_state, &decoded_reset_state, sizeof(reset_state)) == 0);
+
+    test_pinout_event();
     return 0;
 }

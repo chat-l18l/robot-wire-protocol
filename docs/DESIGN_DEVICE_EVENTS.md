@@ -1,6 +1,9 @@
 # Design: device-initiated events
 
-> **Status: design, ready to argue with. Nothing built yet.**
+> **Status: `PINOUT_EVENT` built; `LIGHTS_EVENT` still a proposal.**
+> The pinout codec exists in C and Python with golden vectors, and its contract
+> moved to [Pinout Protocol](PINOUT_PROTOCOL.md), which is authoritative for the
+> frame and the bit assignment. This document keeps the reasoning.
 > Follows [Research: device-initiated events](RESEARCH_DEVICE_INITIATED_EVENTS.md),
 > which established that the protocol cannot express a vehicle-originated
 > message. This document proposes the shape that fixes it.
@@ -315,26 +318,15 @@ nothing, the masks are 64 bits either way, and it keeps related signals
 together as hardware is added instead of interleaving them by installation
 date.
 
-**Inputs**
+Four blocks per mask: operator panel, safety chain, drivetrain and auxiliary
+for inputs; signalling, drivetrain control, auxiliary and expansion for
+outputs. **The assignment itself lives in
+[Pinout Protocol](PINOUT_PROTOCOL.md) and in the enums in
+`robot_wire_protocol.h`**, deliberately in one place rather than repeated here
+where the two copies would drift.
 
-| Bits | Block | Assigned |
-| --- | --- | --- |
-| 0–15 | operator panel | 0 `BUTTON_UP`, 1 `BUTTON_DOWN`, 2 `BUTTON_ESC`, 3 `BUTTON_ENTER`, 4 `BUTTON_TEST`, 5 `TOGGLE_1`, 6 `TOGGLE_2`, 7 `TOGGLE_3` |
-| 16–31 | safety chain | 16 `ESTOP` (assigned, not yet implemented) |
-| 32–47 | drivetrain feedback | none yet |
-| 48–63 | auxiliary connector | none yet |
-
-**Outputs**
-
-| Bits | Block | Assigned |
-| --- | --- | --- |
-| 0–15 | signalling and indication | 0 `HORN`, 1 `HEARTBEAT`, 2 `FULLSTOP_LED`, 3 `ZENOH_LED`, 4 `INDICATOR_LEFT`, 5 `INDICATOR_RIGHT`, 6 `AUTONOMOUS_LED` |
-| 16–31 | drivetrain control | 16 `THROTTLE_DIR_REVERSE`, 17 `EBRAKE`, 18 `SKID_DIR_FL_REVERSE`, 19 `SKID_DIR_FR_REVERSE`, 20 `SKID_DIR_RL_REVERSE`, 21 `SKID_DIR_RR_REVERSE` |
-| 32–47 | auxiliary connector | none yet |
-| 48–63 | expansion | none yet |
-
-The WS2812 lamps are deliberately absent: they are `LIGHTS_EVENT`, with colour,
-arbitration result and source. Repeating them here as on/off bits would be a
+The WS2812 lamps are deliberately absent from it: they are `LIGHTS_EVENT`, with
+colour, arbitration result and source. Repeating them as on/off bits would be a
 second, poorer answer to a question already answered.
 
 The rear expander at `0x26` has no assignments because it has no signals yet.
@@ -364,15 +356,20 @@ mutually exclusive; the masks are what make the blocks affordable.
 
 The rules that follow: a bit number is permanent, a retired signal's number is
 never reused, and a bit that is 0 in `valid` says nothing whatsoever about the
-corresponding level bit. The encoder should force level and changed bits to 0
-outside the valid mask so that a lazy consumer reading a level directly gets
-the harmless answer rather than a stale one.
+corresponding level bit.
 
-### Where this lives once it is built
+An earlier draft had the encoder silently force out-of-valid bits to 0. As
+built it **rejects** them instead, in both directions, as
+`INVALID_PINOUT_MASK`. Silently masking would have made encode and decode stop
+being inverses, and this codec rejects rather than clamps everywhere else. The
+guarantee is the same either way: no conforming frame can claim a signal the
+vehicle does not implement.
 
-In `PINOUT_PROTOCOL.md` beside `LIGHTS_PROTOCOL.md`, with the enum in
-`robot_wire_protocol.h`. It stays in this design document only until something
-implements it.
+### Where this lives
+
+In [`PINOUT_PROTOCOL.md`](PINOUT_PROTOCOL.md) beside `LIGHTS_PROTOCOL.md`, with
+`robot_pinout_input_bit_t` and `robot_pinout_output_bit_t` in
+`robot_wire_protocol.h` so both consumers compile against one definition.
 
 ## Transport: one key per subsystem
 

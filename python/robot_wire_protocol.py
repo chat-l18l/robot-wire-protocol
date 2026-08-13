@@ -31,11 +31,16 @@ __all__ = [
     "LightsResult",
     "LightsSource",
     "EstopClearResetResult",
+    "PinoutInput",
+    "PinoutOutput",
     "Rgb",
     "LightsCommand",
     "LightsState",
     "EstopClearResetRequest",
     "EstopClearResetState",
+    "PinoutEvent",
+    "encode_pinout_event",
+    "decode_pinout_event",
     "encode_lights_command",
     "decode_lights_command",
     "encode_lights_state",
@@ -57,7 +62,14 @@ LIGHTS_MESSAGE_SIZE = HEADER_SIZE + LIGHTS_PAYLOAD_SIZE
 ESTOP_CLEAR_RESET_PAYLOAD_SIZE = 4
 ESTOP_CLEAR_RESET_MESSAGE_SIZE = HEADER_SIZE + ESTOP_CLEAR_RESET_PAYLOAD_SIZE
 
+EVENT_PREFIX_SIZE = 16
+PINOUT_EVENT_PAYLOAD_SIZE = 64
+PINOUT_EVENT_MESSAGE_SIZE = HEADER_SIZE + PINOUT_EVENT_PAYLOAD_SIZE
+
 _HEADER = struct.Struct("<IHHHHI")
+_PINOUT_BODY = struct.Struct("<QIIQQQQQQ")
+
+_UINT64_MAX = 0xFFFFFFFFFFFFFFFF
 
 
 class MessageType(IntEnum):
@@ -65,6 +77,7 @@ class MessageType(IntEnum):
     LIGHTS_STATE = 4
     ESTOP_CLEAR_RESET_REQUEST = 5
     ESTOP_CLEAR_RESET_RESULT = 6
+    PINOUT_EVENT = 7
 
 
 class LightsResult(IntEnum):
@@ -89,6 +102,46 @@ class EstopClearResetResult(IntEnum):
     SAFETY_SEQUENCE_INCOMPLETE = 3
     FAULT_ACTIVE = 4
     INTERNAL_ERROR = 5
+
+
+class PinoutInput(IntEnum):
+    """Input bit numbers. See ``robot_pinout_input_bit_t`` and PINOUT_PROTOCOL.md.
+
+    A bit names a signal rather than an expander pin, and is 1 when the named
+    condition holds regardless of how the line is wired electrically.
+    """
+
+    # 0..15 operator panel
+    BUTTON_UP = 0
+    BUTTON_DOWN = 1
+    BUTTON_ESC = 2
+    BUTTON_ENTER = 3
+    BUTTON_TEST = 4
+    TOGGLE_1 = 5
+    TOGGLE_2 = 6
+    TOGGLE_3 = 7
+    # 16..31 safety chain
+    ESTOP = 16
+
+
+class PinoutOutput(IntEnum):
+    """Output bit numbers. See ``robot_pinout_output_bit_t``."""
+
+    # 0..15 signalling and indication
+    HORN = 0
+    HEARTBEAT = 1
+    FULLSTOP_LED = 2
+    ZENOH_LED = 3
+    INDICATOR_LEFT = 4
+    INDICATOR_RIGHT = 5
+    AUTONOMOUS_LED = 6
+    # 16..31 drivetrain control
+    THROTTLE_DIR_REVERSE = 16
+    EBRAKE = 17
+    SKID_DIR_FL_REVERSE = 18
+    SKID_DIR_FR_REVERSE = 19
+    SKID_DIR_RL_REVERSE = 20
+    SKID_DIR_RR_REVERSE = 21
 
 
 class WireError(ValueError):
@@ -144,6 +197,42 @@ class EstopClearResetState:
     result: int = EstopClearResetResult.OK
     needs_reset: int = 0
     estop_active: int = 0
+
+
+@dataclass
+class PinoutEvent:
+    """A vehicle-originated pinout snapshot.
+
+    Not a reply, so there is no header sequence to correlate with; the counter
+    that matters is ``event_sequence``. ``uptime_ms`` is milliseconds since the
+    vehicle booted and is not comparable to ROS time, and ``boot_id`` is opaque:
+    compare it for equality to notice a restart, never order it.
+
+    The ``_changed`` masks are sticky since the previous event, so a pulse that
+    came and went between two publications is still visible. A bit outside its
+    ``_valid`` mask is rejected, which is what keeps "not wired" distinct from
+    "not asserted".
+    """
+
+    uptime_ms: int = 0
+    event_sequence: int = 0
+    boot_id: int = 0
+    inputs_level: int = 0
+    inputs_changed: int = 0
+    inputs_valid: int = 0
+    outputs_level: int = 0
+    outputs_changed: int = 0
+    outputs_valid: int = 0
+
+
+def _check_pinout_masks(level: int, changed: int, valid: int) -> None:
+    for value, what in ((level, "level"), (changed, "changed"), (valid, "valid")):
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise WireError(f"pinout {what} mask must be an integer")
+        if not 0 <= value <= _UINT64_MAX:
+            raise WireError(f"pinout {what} mask out of range")
+    if (level & ~valid) or (changed & ~valid):
+        raise WireError("INVALID_PINOUT_MASK")
 
 
 def _check_channel(value: int, what: str) -> int:
@@ -238,6 +327,39 @@ def decode_lights_state(data: bytes) -> LightsState:
         active_source=source,
         lights=_decode_rgb(data[HEADER_SIZE + 4 :]),
     )
+
+
+def encode_pinout_event(event: PinoutEvent) -> bytes:
+    _check_pinout_masks(event.inputs_level, event.inputs_changed, event.inputs_valid)
+    _check_pinout_masks(event.outputs_level, event.outputs_changed, event.outputs_valid)
+    if not 0 <= event.uptime_ms <= _UINT64_MAX:
+        raise WireError("uptime_ms out of range")
+    if not 0 <= event.event_sequence <= 0xFFFFFFFF:
+        raise WireError("event_sequence out of range")
+    if not 0 <= event.boot_id <= 0xFFFFFFFF:
+        raise WireError("boot_id out of range")
+    # Header sequence is zero: an event answers no request.
+    header = _encode_header(MessageType.PINOUT_EVENT, PINOUT_EVENT_PAYLOAD_SIZE, 0)
+    return header + _PINOUT_BODY.pack(
+        event.uptime_ms,
+        event.event_sequence,
+        event.boot_id,
+        event.inputs_level,
+        event.inputs_changed,
+        event.inputs_valid,
+        event.outputs_level,
+        event.outputs_changed,
+        event.outputs_valid,
+    )
+
+
+def decode_pinout_event(data: bytes) -> PinoutEvent:
+    _decode_header(data, MessageType.PINOUT_EVENT, PINOUT_EVENT_PAYLOAD_SIZE)
+    fields = _PINOUT_BODY.unpack(data[HEADER_SIZE:])
+    event = PinoutEvent(*fields)
+    _check_pinout_masks(event.inputs_level, event.inputs_changed, event.inputs_valid)
+    _check_pinout_masks(event.outputs_level, event.outputs_changed, event.outputs_valid)
+    return event
 
 
 def encode_estop_clear_reset_request(request: EstopClearResetRequest) -> bytes:

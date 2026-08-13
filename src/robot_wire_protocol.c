@@ -14,6 +14,14 @@ static void write_u32_le(uint8_t* output, uint32_t value)
     output[3] = (uint8_t)((value >> 24U) & UINT32_C(0x000000ff));
 }
 
+static void write_u64_le(uint8_t* output, uint64_t value)
+{
+    size_t index;
+    for (index = 0U; index < 8U; ++index) {
+        output[index] = (uint8_t)((value >> (8U * index)) & UINT64_C(0xff));
+    }
+}
+
 static uint16_t read_u16_le(const uint8_t* input)
 {
     return (uint16_t)((uint16_t)input[0] | ((uint16_t)input[1] << 8U));
@@ -23,6 +31,16 @@ static uint32_t read_u32_le(const uint8_t* input)
 {
     return (uint32_t)((uint32_t)input[0] | ((uint32_t)input[1] << 8U) |
                       ((uint32_t)input[2] << 16U) | ((uint32_t)input[3] << 24U));
+}
+
+static uint64_t read_u64_le(const uint8_t* input)
+{
+    uint64_t value = UINT64_C(0);
+    size_t index;
+    for (index = 0U; index < 8U; ++index) {
+        value |= (uint64_t)input[index] << (8U * index);
+    }
+    return value;
 }
 
 static void encode_header(uint8_t* output, uint16_t message_type, uint16_t payload_size,
@@ -137,6 +155,73 @@ robot_wire_result_t robot_wire_decode_lights_state(const uint8_t* input, size_t 
     state->result = input[17];
     state->active_source = input[18];
     decode_rgb_values(&input[20], state->lights);
+    return ROBOT_WIRE_OK;
+}
+
+/* A level or changed bit outside the valid mask would claim a signal the
+ * vehicle does not implement, which is exactly the confusion the valid mask
+ * exists to prevent. Rejecting rather than silently masking keeps encode and
+ * decode inverses of each other, and matches how this codec treats every other
+ * out-of-range field. */
+static robot_wire_result_t check_pinout_masks(uint64_t level, uint64_t changed, uint64_t valid)
+{
+    if ((level & ~valid) != UINT64_C(0)) return ROBOT_WIRE_INVALID_PINOUT_MASK;
+    if ((changed & ~valid) != UINT64_C(0)) return ROBOT_WIRE_INVALID_PINOUT_MASK;
+    return ROBOT_WIRE_OK;
+}
+
+robot_wire_result_t robot_wire_encode_pinout_event(const robot_pinout_event_t* event,
+                                                    uint8_t* output, size_t output_size)
+{
+    robot_wire_result_t result;
+    if (event == NULL || output == NULL) return ROBOT_WIRE_NULL_ARGUMENT;
+    if (output_size < ROBOT_PINOUT_EVENT_MESSAGE_SIZE) return ROBOT_WIRE_BUFFER_TOO_SMALL;
+    result = check_pinout_masks(event->inputs_level, event->inputs_changed, event->inputs_valid);
+    if (result != ROBOT_WIRE_OK) return result;
+    result = check_pinout_masks(event->outputs_level, event->outputs_changed, event->outputs_valid);
+    if (result != ROBOT_WIRE_OK) return result;
+    /* Header sequence is zero: an event answers no request. */
+    encode_header(output, ROBOT_WIRE_MESSAGE_PINOUT_EVENT,
+                  (uint16_t)ROBOT_PINOUT_EVENT_PAYLOAD_SIZE, UINT32_C(0));
+    write_u64_le(&output[16], event->uptime_ms);
+    write_u32_le(&output[24], event->event_sequence);
+    write_u32_le(&output[28], event->boot_id);
+    write_u64_le(&output[32], event->inputs_level);
+    write_u64_le(&output[40], event->inputs_changed);
+    write_u64_le(&output[48], event->inputs_valid);
+    write_u64_le(&output[56], event->outputs_level);
+    write_u64_le(&output[64], event->outputs_changed);
+    write_u64_le(&output[72], event->outputs_valid);
+    return ROBOT_WIRE_OK;
+}
+
+robot_wire_result_t robot_wire_decode_pinout_event(const uint8_t* input, size_t input_size,
+                                                    robot_pinout_event_t* event)
+{
+    robot_wire_result_t result;
+    uint32_t header_sequence;
+    robot_pinout_event_t decoded;
+    if (event == NULL) return ROBOT_WIRE_NULL_ARGUMENT;
+    result = decode_header(input, input_size, ROBOT_WIRE_MESSAGE_PINOUT_EVENT,
+                           (uint16_t)ROBOT_PINOUT_EVENT_PAYLOAD_SIZE, &header_sequence);
+    if (result != ROBOT_WIRE_OK) return result;
+    decoded.uptime_ms = read_u64_le(&input[16]);
+    decoded.event_sequence = read_u32_le(&input[24]);
+    decoded.boot_id = read_u32_le(&input[28]);
+    decoded.inputs_level = read_u64_le(&input[32]);
+    decoded.inputs_changed = read_u64_le(&input[40]);
+    decoded.inputs_valid = read_u64_le(&input[48]);
+    decoded.outputs_level = read_u64_le(&input[56]);
+    decoded.outputs_changed = read_u64_le(&input[64]);
+    decoded.outputs_valid = read_u64_le(&input[72]);
+    result = check_pinout_masks(decoded.inputs_level, decoded.inputs_changed, decoded.inputs_valid);
+    if (result != ROBOT_WIRE_OK) return result;
+    result =
+        check_pinout_masks(decoded.outputs_level, decoded.outputs_changed, decoded.outputs_valid);
+    if (result != ROBOT_WIRE_OK) return result;
+    /* Populated only once every field has passed, so a rejected frame never
+     * leaves the caller's struct half written. */
+    *event = decoded;
     return ROBOT_WIRE_OK;
 }
 
