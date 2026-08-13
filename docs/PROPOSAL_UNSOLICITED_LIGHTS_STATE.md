@@ -1,7 +1,11 @@
 # Proposal: unsolicited `LIGHTS_STATE`
 
-> **Status: open.** Needs a decision before either consumer changes.
-> Raised: 2026-08-13, from bench observation on `k300_12345`.
+> **Status: superseded.** Raised 2026-08-13 from bench observation on
+> `k300_12345`, and answered by
+> [Design: device-initiated events](DESIGN_DEVICE_EVENTS.md), which takes
+> option 4 below: a separate `LIGHTS_EVENT` type carrying the common event
+> prefix. Kept for the reasoning, which is still the clearest statement of why
+> a reply and an announcement must not share a field.
 
 ## What happened
 

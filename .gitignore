@@ -1,4 +1,3 @@
+__pycache__/
+*.py[cod]
 build/
-install/
-log/
-compile_commands.json

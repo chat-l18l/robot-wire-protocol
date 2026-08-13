@@ -179,6 +179,11 @@ since it is not one and must not become one.
   driven by the same definition, so a script that works proves something about
   the vehicle rather than about the script.
 - Neither consumer can quietly redefine the contract to suit itself.
+- **ROS 2 is optional.** A robot built without it is this system minus the
+  gateway: the vehicle keeps its full command and event surface, and plain
+  Python, a dashboard or a different middleware consume the same frames. See
+  [Design: device-initiated events](DESIGN_DEVICE_EVENTS.md) for why that
+  survives only as long as the firmware stays free of ROS build dependencies.
 
 ## The alternative to all of this
 

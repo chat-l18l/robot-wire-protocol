@@ -1,8 +1,12 @@
 # Research: device-initiated events
 
-> **Status: research, no decision.** Written before building anything, to
+> **Status: research, answered.** Written before building anything, to
 > establish whether the protocol can express a message the vehicle originates.
 > Raised: 2026-08-13.
+>
+> The questions at the end are now settled in
+> [Design: device-initiated events](DESIGN_DEVICE_EVENTS.md). The timestamp
+> does not need to be comparable to ROS time, which was the largest of them.
 
 ## The question
 
