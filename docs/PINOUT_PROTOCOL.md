@@ -4,9 +4,9 @@ Vehicle-originated digital I/O state. The reasoning behind the shape is in
 [Design: device-initiated events](DESIGN_DEVICE_EVENTS.md); this document is
 the contract.
 
-> **Codec implemented, no publisher yet.** `robot_wire_encode_pinout_event()`
-> and its decoder exist in both implementations and are covered by golden
-> vectors. No firmware publishes the message and no gateway subscribes to it.
+> **Codec and vehicle publisher implemented; no gateway subscriber yet.** The
+> SDC2026 firmware publishes this message; nothing on the ROS side consumes it,
+> so it is observable today only with a Zenoh subscriber.
 
 ## Route
 
