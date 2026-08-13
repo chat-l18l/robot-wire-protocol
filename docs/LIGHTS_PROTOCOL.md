@@ -25,3 +25,8 @@ message type, length, light count, result or source without applying hardware.
 The motion core owns arbitration: local safety/fault state has priority over the
 ROS binary route and education JSON route. The state frame echoes the command
 sequence and reports the actually applied values.
+
+Whether a state frame may be published without a new command, when the
+arbitration outcome changes on its own, is **not yet specified**. Both readings
+are in use and neither implementation is at fault. See
+[Proposal: unsolicited LIGHTS_STATE](PROPOSAL_UNSOLICITED_LIGHTS_STATE.md).
