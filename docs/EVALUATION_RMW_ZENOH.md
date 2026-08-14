@@ -1,8 +1,9 @@
 # Evaluation: speaking rmw_zenoh directly from the vehicle
 
-> **Status: evaluated, not adopted, but the blocking unknown is now answered
-> and a next step is proposed.** An existing project, Pico-ROS, already does
-> this; see the spike section, which replaced the spike. Recorded because it is a genuine third option that
+> **Status: proven to work on hardware; still not adopted.** The spike ran on
+> an ESP32-P4 against ROS 2 with `rmw_zenoh`, and the vehicle appeared as a
+> full participant: data, topic and node. See "The spike ran" below. Adoption
+> is now a design question rather than a feasibility one. Recorded because it is a genuine third option that
 > was not on the table when [Evaluation: micro-ROS](EVALUATION_MICRO_ROS.md)
 > was written, and because two of the four things commonly said about it are
 > wrong in ways that change the decision.
@@ -350,19 +351,57 @@ time. It also says the project is young enough to have a bug in a
 **`*((uint32_t*)pBUF) = 0x0100`** assumes a little-endian host. True on
 RISC-V, and a type-punned unaligned store either way.
 
+## The spike ran, and it works
+
+`tests/bringup/ros_native/esp_picoros_talker` in the omnibot repository, on an
+ESP32-P4 against ROS 2 with `rmw_zenoh` on an AGX Orin. All three levels:
+
+| Check | Result |
+| --- | --- |
+| `ros2 topic echo /picoros/chatter std_msgs/msg/String` | receives |
+| `ros2 topic list --no-daemon` | `/picoros/chatter` |
+| `ros2 node list --no-daemon` | `/picoros_p4` |
+
+So the whole chain holds in practice: the key expression, the CDR payload with
+its 4-byte encapsulation, the mandatory 33-byte attachment, and both liveliness
+tokens. **An ESP32-P4 can be a first-class ROS 2 participant with no ROS
+package anywhere in its firmware build.**
+
+Two findings from doing it, neither of them about Pico-ROS:
+
+**Pico-ROS builds against upstream zenoh-pico 1.9.0**, not only its own
+vendored 1.8.0 fork. That was the concern that would have made it unusable
+alongside our existing stack, and it is not one.
+
+**The ROS daemon caches the graph and will report an empty one indefinitely.**
+Every listing was empty until `--no-daemon` was passed, with nothing wrong on
+the vehicle. Worth knowing before anyone else spends an afternoon on it.
+
+Untested and load-bearing for a fielded vehicle: whether the vehicle rejoins
+the graph when the **router alone** restarts. The tokens only appeared after
+both ends were restarted. zenoh-pico re-announces `_local_tokens` on interest
+and has auto-reconnect enabled, so it ought to recover unaided, but that is an
+inference rather than an observation.
+
 ## Recommendation
 
-Not a migration, and not yet a decision. The next step is a **standalone
-ESP32-P4 application**, outside the SDC2026 firmware, publishing one
-`std_msgs/String` and checked with `ros2 topic echo`. That validates the key
-expression, the encapsulated payload, the attachment and the liveliness token
-in one shot, on our actual chip, at no risk to working firmware.
+Still not a migration. Feasibility is settled; desirability is not, and they
+are different questions.
 
-If that works, the interesting question is not "replace the wire protocol" but
-"which topics, if any, are better published as native ROS messages than
-translated by the gateway". Odometry at rate is the obvious candidate. The
-vehicle's own semantics, and the education JSON route students read without a
-type description, have no reason to move.
+What has not changed is the objection in "The coupling that replaces it": this
+works by matching four formats the rmw_zenoh project explicitly declines to
+support. Working today is not the same as a contract. What has changed is who
+carries that burden — Pico-ROS tracks rmw_zenoh, and we would track Pico-ROS,
+which is a considerably better position than reimplementing it ourselves.
+
+The question worth asking now is not "replace the wire protocol" but **which
+topics, if any, are better published as native ROS messages than translated by
+the gateway**. Odometry at rate is the obvious candidate: high rate, standard
+type, and the gateway adds nothing but a hop.
+
+The vehicle's own semantics have no reason to move. Neither does the education
+JSON route, which students read without a type description and which would
+become CDR nobody can inspect with a text editor.
 
 ## What was verified rather than assumed
 
