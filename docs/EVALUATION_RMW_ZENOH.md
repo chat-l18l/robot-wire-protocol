@@ -1,7 +1,8 @@
 # Evaluation: speaking rmw_zenoh directly from the vehicle
 
-> **Status: evaluated, not adopted, but materially better than micro-ROS on the
-> axis that matters here.** Recorded because it is a genuine third option that
+> **Status: evaluated, not adopted, but the blocking unknown is now answered
+> and a next step is proposed.** An existing project, Pico-ROS, already does
+> this; see the spike section, which replaced the spike. Recorded because it is a genuine third option that
 > was not on the table when [Evaluation: micro-ROS](EVALUATION_MICRO_ROS.md)
 > was written, and because two of the four things commonly said about it are
 > wrong in ways that change the decision.
@@ -219,27 +220,149 @@ Not adopted, for now. The gateway stays.
 4. **`rmw_zenoh_pico` grows ESP32 support and drops the micro-ROS stack.**
    Either alone is not enough.
 
-## A spike worth doing before any of that
+## The spike was answered by reading, not building: Pico-ROS
 
-Small, bounded, and it answers the riskiest unknown first: **can zenoh-pico
-even produce the attachment?**
+A spike was planned to answer the riskiest unknown — whether zenoh-pico can
+even produce the attachment — because a "no" would close the route and make the
+rest moot.
 
-`rmw_zenoh_cpp` builds it with the zenoh-cpp serialisation helpers, and
-zenoh-pico is a different implementation with a different API surface. If the
-attachment cannot be byte-matched from pico, the whole route is closed and the
-rest of the investigation is moot.
+It does not need writing. [Pico-ROS](https://github.com/Pico-ROS) is exactly
+this, already built: *"a lightweight ROS client implementation designed for
+resource-constrained devices. Built on top of zenoh-pico and working in
+conjunction with rmw-zenoh"*. BSD-3-Clause, and it ships an ESP-IDF component.
 
-The order to answer the unknowns:
+Every unknown on the list above is answered in its source.
 
-1. Can zenoh-pico attach the exact 33-byte attachment layout?
-2. Does an `ros2 topic echo` receive a hand-built sample with a correct key,
-   encapsulated CDR payload and attachment, but **no liveliness token**?
-3. If not, what is the minimum liveliness token that makes it visible?
-4. Is the type hash of one unchanged message identical across two
-   distributions?
+### 1. Yes, zenoh-pico can produce the attachment
 
-Question 2 is worth isolating, because liveliness affects graph introspection
-and it is not established here whether data flow requires it at all.
+`src/picoros.h` declares it as a packed struct:
+
+```c
+typedef struct __attribute__((__packed__)) {
+    int64_t  sequence_number;
+    int64_t  time;
+    uint8_t  rmw_gid_size;
+    uint8_t  rmw_gid[RMW_GID_SIZE];
+} rmw_attachment_t;
+```
+
+8 + 8 + 1 + 16 = 33 bytes, matching the rmw_zenoh design document byte for
+byte, attached with `z_bytes_from_static_buf` into
+`z_publisher_put_options_t::attachment`. No API gap, no serialisation helper
+missing from pico. The route is open.
+
+### 2. The 4-byte header is literally one line
+
+```c
+*((uint32_t*)pBUF) =  0x0100; /*Little endian header*/
+ucdr_init_buffer(&writer, pBUF + sizeof(uint32_t), MAX - sizeof(uint32_t));
+```
+
+CDR encapsulation, then Micro-CDR for the body. Exactly as predicted, and the
+whole of it.
+
+### 3. The type hash is a runtime string, which was the crux
+
+```c
+snprintf(keyexpr, KEYEXPR_SIZE, "%" PRIu32 "/%s/%s_/RIHS01_%s",
+         node->domain_id, topic->name, topic->type, topic->rihs_hash);
+```
+
+`rmw_topic_t` carries `const char* rihs_hash`. The type identity is a string
+field, not generated code. This is the concrete form of the coupling argument
+made above: a type identity that can be changed without recompiling is a
+different kind of dependency from one that is compiled in.
+
+### 4. Liveliness is handled, so the question does not arise
+
+Pico-ROS declares a node token and a per-entity token, `"MP"` for a message
+publisher, via `z_liveliness_declare_token`. Whether data would flow without
+one is now academic.
+
+### 5. Type generation runs without ROS installed
+
+This is the finding that matters most, and it is stated outright in
+`tools/type-gen/readme.md`: *"Runs on host without ROS installation with
+virtual environment"*. The script vendors `rosidl` and mocks the parts that
+would otherwise require a workspace:
+
+```python
+"""Mock ament_index_python module for standalone rosidl usage.
+...provides a minimal implementation... without requiring a full ROS2
+installation."""
+```
+
+Dependencies are `lark`, `empy`, `catkin-pkg`, `argcomplete` — pip, in a venv.
+It reads `.msg` files and emits a header of **strings and field lists**:
+
+```c
+CTYPE(ros_Point,
+    "geometry_msgs::msg::dds_::Point",
+    "6963084842a9b04494d6b2941d11444708d892da2f4b09843b9c43f42a7f6881",
+    FIELD(double, x) ...
+```
+
+Generated once, checked in, no ROS in the firmware build and none in CI. That
+is precisely the decoupling this evaluation hypothesised, implemented.
+
+## What Pico-ROS changes, and what it does not
+
+It removes the "reimplement four undocumented formats" objection, because the
+reimplementation exists and is maintained by someone tracking rmw_zenoh. We
+would track Pico-ROS instead of tracking rmw_zenoh's internals directly, which
+is a considerably better position.
+
+It does not remove the argument for this repository. Pico-ROS is a way to
+*also* be a ROS participant; it says nothing about whether the vehicle's own
+semantics should be ROS message types.
+
+### Four concerns, in order of how much they would cost us
+
+**It vendors its own zenoh-pico, and we already have one.** The ESP-IDF
+component globs `picoros/thirdparty/zenoh-pico/src/**` straight into the build.
+We pull zenoh-pico 1.9.0 from upstream through PlatformIO; the submodule pins
+1.8.0. Two copies of zenoh-pico in one binary is duplicate symbols, so the
+component cannot be adopted as-is — it would have to be pointed at ours.
+
+That looks feasible: the submodule is `git@github.com:g4sp3r/zenoh-pico.git`, a
+personal mirror whose visible history is upstream commits merged from
+`eclipse-zenoh:main`, with no divergence found. It is also an SSH URL, so
+`git submodule update --init --recursive` fails for anyone without keys.
+
+**The ESP-IDF component names no chips and no IDF version.** Unlike micro-ROS,
+this is not a blocker: the platform layer is zenoh-pico's `system/espidf`, and
+we already run zenoh-pico 1.9.0 on an ESP32-P4 in production firmware. The
+question that killed micro-ROS does not exist here.
+
+**The timestamp is wrong, and that is informative.**
+
+```c
+pub->attachment.time = z_clock_now().tv_nsec;
+```
+
+`tv_nsec` is the nanoseconds *field* of a timespec, 0 to 999999999, not
+nanoseconds since the epoch. So the attachment timestamp cycles once a second
+and means nothing. That it works anyway says rmw_zenoh does not validate the
+field — useful for us, since our own design deliberately avoided wall-clock
+time. It also says the project is young enough to have a bug in a
+33-byte struct, which is worth weighing.
+
+**`*((uint32_t*)pBUF) = 0x0100`** assumes a little-endian host. True on
+RISC-V, and a type-punned unaligned store either way.
+
+## Recommendation
+
+Not a migration, and not yet a decision. The next step is a **standalone
+ESP32-P4 application**, outside the SDC2026 firmware, publishing one
+`std_msgs/String` and checked with `ros2 topic echo`. That validates the key
+expression, the encapsulated payload, the attachment and the liveliness token
+in one shot, on our actual chip, at no risk to working firmware.
+
+If that works, the interesting question is not "replace the wire protocol" but
+"which topics, if any, are better published as native ROS messages than
+translated by the gateway". Odometry at rate is the obvious candidate. The
+vehicle's own semantics, and the education JSON route students read without a
+type description, have no reason to move.
 
 ## What was verified rather than assumed
 
@@ -256,12 +379,25 @@ and it is not established here whether data flow requires it at all.
 - Interop being out of scope, verbatim: the `ros2/rmw_zenoh` README.
 - `rmw_zenoh_pico`'s maturity, targets and micro-ROS dependency: its README.
 
+- Pico-ROS's attachment struct, key expression construction, CDR encapsulation
+  write, liveliness token declaration and timestamp bug: read from a clone of
+  `Pico-ROS/Pico-ROS-software` at `master`, files `src/picoros.c`,
+  `src/picoros.h` and `src/picoserdes.h`.
+- Type generation without a ROS installation: `tools/type-gen/readme.md`,
+  `tools/type-gen/requirements.txt` and the mock in
+  `tools/type-gen/ament_index_python.py`.
+- The vendored zenoh-pico's origin, version and history: the submodule in
+  `Pico-ROS/picoros-espidf-component`.
+- That our own zenoh-pico 1.9.0 already exposes `z_liveliness_declare_token`:
+  read from the PlatformIO dependency in this project.
+
 Not verified, and each one could change the conclusion:
 
-- Whether data flows to an `rmw_zenoh` subscriber with no liveliness token.
 - Whether a type hash is identical across two ROS distributions in practice.
-- Whether zenoh-pico can produce a byte-identical attachment.
-- The flash and RAM cost of CDR encoding plus the larger key expressions.
+- Whether Pico-ROS builds and runs on ESP32-P4 at all, and against our
+  zenoh-pico rather than its own.
+- Whether `ros2 topic echo` actually receives from it, end to end.
+- The flash and RAM cost of Micro-CDR plus a second set of key expressions.
 
 ## Sources
 
@@ -270,3 +406,6 @@ Not verified, and each one could change the conclusion:
 - <https://github.com/esol-community/rmw_zenoh_pico>
 - <https://discourse.openrobotics.org/t/integrating-ros-2-with-microcontrollers-when-using-zenoh/43463>
 - <https://docs.ros.org/en/jazzy/p/rmw_zenoh_cpp/>
+- <https://github.com/Pico-ROS/Pico-ROS-software>
+- <https://github.com/Pico-ROS/picoros-espidf-component>
+- <https://github.com/eProsima/Micro-CDR>
