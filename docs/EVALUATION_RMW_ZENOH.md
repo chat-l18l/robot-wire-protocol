@@ -377,11 +377,26 @@ alongside our existing stack, and it is not one.
 Every listing was empty until `--no-daemon` was passed, with nothing wrong on
 the vehicle. Worth knowing before anyone else spends an afternoon on it.
 
-Untested and load-bearing for a fielded vehicle: whether the vehicle rejoins
-the graph when the **router alone** restarts. The tokens only appeared after
-both ends were restarted. zenoh-pico re-announces `_local_tokens` on interest
-and has auto-reconnect enabled, so it ought to recover unaided, but that is an
-inference rather than an observation.
+**The vehicle rejoins the graph when the router alone restarts**, with nothing
+touched on the device: `rmw_zenohd` was stopped and started, and `/picoros_p4`
+came back in `ros2 node list` by itself. That was the load-bearing question for
+a fielded vehicle, which cannot be power-cycled every time a router is, and it
+is now an observation rather than an inference.
+
+Getting there took four defects, none of them in the protocol or in Pico-ROS,
+and all worth knowing before anyone repeats this:
+
+| Symptom | Cause |
+| --- | --- |
+| Watchdog reboot on session teardown | `z_sleep_us` truncates sub-ms sleeps to `vTaskDelay(0)` |
+| Watchdog reboot on a dead link | `Z_RUNTIME_IDLE_READ_TASK_SLEEP` defaults to 0, so the read task spins |
+| 30 s from handshake to usable session | `tcp_esp32.c` discards `Z_CONFIG_SOCKET_TIMEOUT` |
+| Session dropping every 60 s | The same blocked `recv()`, starving the lease task |
+
+All four are in zenoh-pico's ESP-IDF port or its executor defaults, all four are
+worked around in
+`tests/bringup/ros_native/esp_picoros_talker` in the omnibot repository, and the
+last two are one missing `setsockopt` that upstream fixes in two lines.
 
 ## Recommendation
 
@@ -432,11 +447,9 @@ become CDR nobody can inspect with a text editor.
 
 Not verified, and each one could change the conclusion:
 
-- Whether a type hash is identical across two ROS distributions in practice.
-- Whether Pico-ROS builds and runs on ESP32-P4 at all, and against our
-  zenoh-pico rather than its own.
-- Whether `ros2 topic echo` actually receives from it, end to end.
-- The flash and RAM cost of Micro-CDR plus a second set of key expressions.
+- Whether a type hash really is identical across two ROS distributions in
+  practice, which is the claim the whole decoupling argument rests on.
+- Long-run stability: the longest observed run is minutes, not days.
 
 ## Sources
 
