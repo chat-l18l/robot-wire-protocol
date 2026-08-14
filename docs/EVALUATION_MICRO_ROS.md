@@ -89,6 +89,20 @@ The events problem is solved in this protocol instead: a message category for
 vehicle-originated state, costing a timestamp, a boot identifier and an event
 sequence. That is real work, but it is done once and the decoupling is kept.
 
+## A third option exists, and it is not micro-ROS
+
+Since this was written, ROS 2 gained `rmw_zenoh`, which lets ROS nodes speak
+Zenoh natively. A vehicle can then reach ROS topics without compiling any ROS
+package into its firmware: the type identity is a string in a key expression
+rather than generated code, so a distribution upgrade need not reflash
+anything. That removes the single row in the table above that made micro-ROS
+unacceptable here.
+
+It was evaluated separately and also not adopted, for different reasons.
+See [Evaluation: rmw_zenoh](EVALUATION_RMW_ZENOH.md). The relevant point for
+this document is that it makes the case against micro-ROS stronger, not
+weaker: reaching ROS 2 no longer requires accepting build-time coupling.
+
 ## When to revisit
 
 Any of these should reopen it:

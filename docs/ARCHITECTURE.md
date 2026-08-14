@@ -187,13 +187,20 @@ since it is not one and must not become one.
 
 ## The alternative to all of this
 
-micro-ROS makes the microcontroller a ROS 2 node and removes the need for a
-separate protocol at all. It was evaluated and rejected for this fleet, and the
-reasoning is worth knowing before anyone proposes it again: interface
-definitions compile into the firmware, so a message change or a distribution
-upgrade reflashes every vehicle, and the separation described above is exactly
-what gets traded away. See [Evaluation: micro-ROS](EVALUATION_MICRO_ROS.md),
-including the conditions under which the answer should change.
+Two alternatives remove the need for a separate protocol, and both have been
+evaluated. Read the relevant one before proposing either again.
+
+micro-ROS makes the microcontroller a ROS 2 node. Interface definitions compile
+into the firmware, so a message change or a distribution upgrade reflashes
+every vehicle, and the separation described above is exactly what gets traded
+away. See [Evaluation: micro-ROS](EVALUATION_MICRO_ROS.md).
+
+`rmw_zenoh` lets ROS 2 speak Zenoh natively, so a vehicle could publish onto
+ROS topics directly with no ROS package in its build. The coupling is milder —
+type identity is a string, not generated code — but it means replicating four
+undocumented internal formats that the project explicitly declines to support.
+See [Evaluation: rmw_zenoh](EVALUATION_RMW_ZENOH.md), including the spike that
+would settle it.
 
 ## Rules that follow
 
